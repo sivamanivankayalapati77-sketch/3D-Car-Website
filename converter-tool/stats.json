@@ -1,0 +1,22 @@
+{
+  "heroDesktop": {
+    "count": 600,
+    "bytes": 19977192,
+    "formatted": "19.05 MB"
+  },
+  "heroMobile": {
+    "count": 600,
+    "bytes": 9774334,
+    "formatted": "9.32 MB"
+  },
+  "dismantleDesktop": {
+    "count": 200,
+    "bytes": 11113076,
+    "formatted": "10.60 MB"
+  },
+  "dismantleMobile": {
+    "count": 200,
+    "bytes": 5487432,
+    "formatted": "5.23 MB"
+  }
+}

@@ -1,0 +1,1363 @@
+/* ==========================================================================
+   NOCTIS — BRAND DESIGN SYSTEM & SCROLLYTELLING STYLES
+   Mood: A city in total blackout at night. The car's light is the only light.
+   Quiet, expensive, precise.
+   Strict rules: Flat solid colors only, 1px hairlines, photography and type.
+   NO gradients, NO glassmorphism, NO blur, NO glow, NO drop shadows.
+   ========================================================================== */
+
+:root {
+  /* Design Tokens */
+  --asphalt: #07080A;          /* Page background */
+  --graphite: #121418;         /* Subtle secondary surfaces */
+  --fog: #8A8F98;              /* Secondary & muted type */
+  --bone: #EDEAE4;             /* Primary text & high contrast */
+  --xenon: #CFE3FF;            /* Primary light accent */
+  --taillight: #E1251B;        /* Active ticks & subtle brake accent */
+  --hairline: rgba(237, 234, 228, 0.12); /* 1px borders & dividers */
+
+  /* Typography */
+  --font-display: 'Archivo', -apple-system, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  /* Strict Easing */
+  --ease-precision: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-normal: 0.7s;
+  --duration-reveal: 0.9s;
+}
+
+/* Reset & Base Setup */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0; /* Strict: NO rounded bubbly elements */
+}
+
+html {
+  background-color: var(--asphalt);
+  color: var(--bone);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip; /* Clean clipping without breaking position: sticky */
+  scroll-behavior: auto; /* Scrubbing is driven by native scroll */
+}
+
+body {
+  background-color: var(--asphalt);
+  color: var(--bone);
+  min-height: 100vh;
+  position: relative;
+  overflow-x: clip;
+}
+
+/* Custom Cursor: Hide default when pointer is fine */
+@media (pointer: fine) {
+  body.custom-cursor-enabled,
+  body.custom-cursor-enabled a,
+  body.custom-cursor-enabled button,
+  body.custom-cursor-enabled [role="button"],
+  body.custom-cursor-enabled input {
+    cursor: none !important;
+  }
+}
+
+/* Focus styles for keyboard accessibility */
+:focus-visible {
+  outline: 1px solid var(--xenon);
+  outline-offset: 3px;
+}
+
+/* Typography Presets */
+.display-title {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  font-size: clamp(40px, 7vw, 120px);
+  line-height: 0.95;
+  color: var(--bone);
+}
+
+.body-text {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: clamp(15px, 1.2vw, 17px);
+  line-height: 1.6;
+  max-width: 52ch;
+  color: var(--fog);
+}
+
+.hud-mono {
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--fog);
+}
+
+/* Line-by-Line Reveal Mask */
+.line-mask {
+  display: block;
+  overflow: hidden;
+}
+
+.line-inner {
+  display: block;
+  transform: translateY(105%);
+  transition: transform var(--duration-reveal) var(--ease-precision);
+  will-change: transform;
+}
+
+.revealed .line-inner,
+.line-revealed {
+  transform: translateY(0%);
+}
+
+/* ==========================================================================
+   GLOBAL FILM GRAIN OVERLAY
+   Canvas-based noise tile shifted randomly 8x/s, 3.5% opacity, no vignette.
+   ========================================================================== */
+.film-grain-canvas {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  pointer-events: none;
+  z-index: 9998;
+  opacity: 0.035;
+}
+
+/* ==========================================================================
+   CUSTOM CURSOR ("THE HEADLIGHT")
+   6px solid xenon dot inside 28px 1px stroke ring.
+   Morphs over interactives into 44x2px light bar with mono label.
+   ========================================================================== */
+.headlight-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+  z-index: 10000;
+  transform: translate(-50%, -50%);
+  display: none;
+}
+
+@media (pointer: fine) {
+  .headlight-cursor {
+    display: block;
+  }
+}
+
+.headlight-ring {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--xenon);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.28s var(--ease-precision),
+              height 0.28s var(--ease-precision),
+              border-color 0.15s linear,
+              background-color 0.15s linear,
+              border-radius 0.28s var(--ease-precision);
+  position: relative;
+}
+
+.headlight-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--xenon);
+  border-radius: 50%;
+  transition: opacity 0.2s linear, transform 0.2s var(--ease-precision);
+}
+
+.headlight-label {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--xenon);
+  text-transform: uppercase;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+/* Cursor Morphed State: Light Bar */
+.headlight-cursor.is-hovering .headlight-ring {
+  width: 44px;
+  height: 2px;
+  border-radius: 0;
+  border: none;
+  background-color: var(--xenon);
+}
+
+.headlight-cursor.is-hovering .headlight-dot {
+  opacity: 0;
+}
+
+.headlight-cursor.is-hovering .headlight-label {
+  opacity: 1;
+}
+
+/* Active Mousedown flash (120ms brighter) */
+.headlight-cursor.is-down .headlight-ring {
+  background-color: #FFFFFF;
+}
+
+/* ==========================================================================
+   PRELOADER
+   Solid asphalt, NOCTIS wordmark, center-growing xenon line with 000-100 mono.
+   ========================================================================== */
+.preloader {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: #000000;
+  z-index: 10001;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.6s var(--ease-precision), visibility 0.6s ease;
+}
+
+.preloader.fade-out {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.preloader-brand {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(32px, 5vw, 64px);
+  letter-spacing: 0.08em;
+  color: var(--bone);
+  margin-bottom: 32px;
+}
+
+.preloader-track {
+  width: 240px;
+  height: 1px;
+  background-color: var(--hairline);
+  position: relative;
+  display: flex;
+  justify-content: center;
+}
+
+.preloader-bar {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) scaleX(0);
+  width: 100%;
+  height: 1px;
+  background-color: var(--xenon);
+  transform-origin: center;
+  transition: transform 0.1s linear, background-color 0.15s ease;
+}
+
+.preloader-bar.flash {
+  background-color: #FFFFFF;
+  height: 2px;
+}
+
+.preloader-counter {
+  margin-top: 20px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+/* ==========================================================================
+   NAVIGATION
+   Fixed transparent header with mix-blend-mode: difference.
+   Hides on scroll down, shows on scroll up.
+   ========================================================================== */
+.site-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  padding: 32px 48px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 9990;
+  mix-blend-mode: difference;
+  transition: transform 0.4s var(--ease-precision);
+  will-change: transform;
+}
+
+.site-nav.nav-hidden {
+  transform: translateY(-100%);
+}
+
+.nav-wordmark {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 400;
+  font-size: 18px;
+  letter-spacing: 0.14em;
+  color: var(--bone);
+  text-decoration: none;
+}
+
+.nav-links {
+  display: flex;
+  gap: 36px;
+  list-style: none;
+}
+
+.nav-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--bone);
+  text-decoration: none;
+  position: relative;
+  padding: 4px 0;
+}
+
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background-color: var(--xenon);
+  transform: scaleX(0);
+  transform-origin: right;
+  transition: transform 0.3s var(--ease-precision);
+}
+
+.nav-link:hover::after {
+  transform: scaleX(1);
+  transform-origin: left;
+}
+
+/* ==========================================================================
+   SCROLL PROGRESS LINE (PINNED SECTIONS)
+   1px xenon progress line at the bottom of pinned sections.
+   ========================================================================== */
+.section-progress-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background-color: var(--xenon);
+  transform-origin: left;
+  transform: scaleX(0);
+  z-index: 40;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   SECTION 1 — HERO (PINNED SCROLLYTELLING)
+   Tall wrapper (600vh). Sticky stage (100vh / 100svh).
+   ========================================================================== */
+.pinned-section {
+  position: relative;
+  width: 100%;
+}
+
+.hero-section {
+  height: 600vh; /* Controlled by config.js */
+}
+
+.sticky-stage {
+  position: sticky;
+  top: 0;
+  width: 100%;
+  height: 100vh;
+  height: 100svh;
+  overflow: hidden;
+  background-color: var(--asphalt);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scrub-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 10;
+  pointer-events: none;
+  will-change: opacity;
+}
+
+/* Left-Edge HUD (Section 1) */
+.hero-hud {
+  position: absolute;
+  left: 48px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  pointer-events: none;
+}
+
+.hud-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hud-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+.hud-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-tick {
+  width: 4px;
+  height: 4px;
+  background-color: var(--taillight);
+  display: inline-block;
+}
+
+.hud-value {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.1em;
+  color: var(--bone);
+}
+
+/* Hero Text Chapters (Placed in empty night sky) */
+.hero-chapters {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.hero-chapter {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 90%;
+  max-width: 1200px;
+  text-align: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.5s var(--ease-precision), visibility 0.5s ease;
+  pointer-events: none;
+}
+
+.hero-chapter.active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* Chapter 1: Intro */
+.chapter-intro .hero-brand-title {
+  font-size: clamp(52px, 10vw, 150px);
+  letter-spacing: 0.08em;
+  margin-bottom: 12px;
+}
+
+.chapter-intro .hero-sub {
+  font-family: var(--font-body);
+  font-size: clamp(16px, 1.4vw, 20px);
+  color: var(--fog);
+  margin-bottom: 48px;
+}
+
+.scroll-hint {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.scroll-hint-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--xenon);
+}
+
+.scroll-hint-line {
+  width: 1px;
+  height: 36px;
+  background-color: var(--xenon);
+  animation: pulseLine 2s infinite var(--ease-precision);
+  transform-origin: top;
+}
+
+@keyframes pulseLine {
+  0% { transform: scaleY(0); opacity: 0.2; }
+  50% { transform: scaleY(1); opacity: 1; }
+  100% { transform: scaleY(0); opacity: 0.2; }
+}
+
+/* Chapter 2 & 3: Minimal Statements in Sky */
+.chapter-statement {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(32px, 5.5vw, 84px);
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+  color: var(--bone);
+}
+
+/* Chapter 4: GT-E Specs & Action */
+.chapter-gte {
+  top: 14%;
+}
+
+.chapter-gte .gte-title {
+  font-size: clamp(48px, 8vw, 130px);
+  margin-bottom: 14px;
+}
+
+.gte-specs-row {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--xenon);
+  margin-bottom: 24px;
+}
+
+.inline-link {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--bone);
+  text-decoration: none;
+  display: inline-block;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--xenon);
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+.inline-link:hover {
+  color: var(--xenon);
+}
+
+/* ==========================================================================
+   SECTION 2 — STATEMENT (NOT PINNED, 100vh)
+   Centred, one sentence revealing word by word with scroll progress.
+   ========================================================================== */
+.statement-section {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 80px 48px;
+  background-color: var(--asphalt);
+  position: relative;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.statement-inner {
+  max-width: 1100px;
+  text-align: center;
+}
+
+.statement-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--fog);
+  margin-bottom: 36px;
+}
+
+.statement-headline {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(34px, 5.2vw, 80px);
+  line-height: 1.15;
+  letter-spacing: 0.02em;
+  color: var(--bone);
+}
+
+.statement-headline .word {
+  display: inline-block;
+  opacity: 0.15;
+  transition: opacity 0.2s ease;
+  margin-right: 0.22em;
+}
+
+/* ==========================================================================
+   SECTION 3 — DISMANTLE (PINNED SCROLLYTELLING, 350vh)
+   Chassis separates into composite layers. Callouts appear after 70%.
+   ========================================================================== */
+.dismantle-section {
+  height: 350vh; /* Controlled by config.js */
+}
+
+.dismantle-title {
+  position: absolute;
+  top: 48px;
+  left: 48px;
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(28px, 4vw, 56px);
+  letter-spacing: 0.04em;
+  color: var(--bone);
+  z-index: 30;
+  pointer-events: none;
+}
+
+/* Dismantle Callouts Layer */
+.callouts-layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 25;
+  pointer-events: none;
+}
+
+.callout-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 0.6s var(--ease-precision);
+  pointer-events: none;
+}
+
+.callout-item.active {
+  opacity: 1;
+}
+
+/* The Callout Point: 4px solid xenon dot */
+.callout-dot {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  background-color: var(--xenon);
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  z-index: 2;
+}
+
+/* Hairline SVG line connecting dot to card */
+.callout-line-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.callout-line-path {
+  stroke: var(--xenon);
+  stroke-width: 1;
+  fill: none;
+  stroke-dasharray: 200;
+  stroke-dashoffset: 200;
+  transition: stroke-dashoffset 0.8s var(--ease-precision);
+}
+
+.callout-item.active .callout-line-path {
+  stroke-dashoffset: 0;
+}
+
+/* Callout Info Card */
+.callout-card {
+  position: absolute;
+  max-width: 280px;
+  padding: 12px 16px;
+  background-color: var(--graphite);
+  border: 1px solid var(--hairline);
+  z-index: 3;
+}
+
+.callout-code {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--xenon);
+  margin-bottom: 4px;
+}
+
+.callout-name {
+  font-family: var(--font-body);
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--bone);
+}
+
+/* ==========================================================================
+   SECTION 4 — LINEUP (HOVER ACCORDION, NOT PINNED, 100vh)
+   Five full-height vertical slides across full width.
+   Separated by 1px hairlines. GT-E open by default.
+   ========================================================================== */
+.lineup-section {
+  min-height: 100vh;
+  position: relative;
+  background-color: var(--asphalt);
+  display: flex;
+  flex-direction: column;
+  padding: 48px 0 0 0;
+  border-top: 1px solid var(--hairline);
+  overflow: hidden;
+}
+
+.lineup-header {
+  padding: 0 48px 36px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.lineup-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+.lineup-heading {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(32px, 5vw, 68px);
+  color: var(--bone);
+  line-height: 1;
+}
+
+/* Accordion Container */
+.accordion-wrapper {
+  flex: 1;
+  display: flex;
+  width: 100%;
+  min-height: calc(100vh - 160px);
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.accordion-slide {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background-color: var(--asphalt);
+  border-right: 1px solid var(--hairline);
+  overflow: hidden;
+  transition: flex-grow var(--duration-normal) var(--ease-precision),
+              opacity 0.6s var(--ease-precision),
+              transform 0.6s var(--ease-precision);
+  flex-basis: 0;
+  flex-grow: 1; /* Closed width default */
+  min-width: 0;
+  outline: none;
+  cursor: pointer;
+  text-align: left;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.accordion-slide:last-child {
+  border-right: none;
+}
+
+/* Closed Slide State */
+.accordion-slide[aria-expanded="false"] {
+  flex-grow: 1; /* Approx 12vw */
+}
+
+/* Open Slide State */
+.accordion-slide[aria-expanded="true"] {
+  flex-grow: 4.5; /* Takes remaining width approx 52vw */
+}
+
+/* Car Image inside Slide */
+.slide-car-container {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.slide-car-image {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center 72%; /* Wheels sitting at 72% floor line */
+  transition: transform var(--duration-normal) var(--ease-precision),
+              filter var(--duration-normal) var(--ease-precision),
+              opacity var(--duration-normal) var(--ease-precision);
+  will-change: transform, filter, opacity;
+}
+
+/* Shared floor line across slides at 72% height */
+.lineup-floor-line {
+  position: absolute;
+  top: 72%;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  background-color: var(--hairline);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Closed Image styling: 25% brightness, greyscale, cropped on front light bar */
+.accordion-slide[aria-expanded="false"] .slide-car-image {
+  filter: grayscale(100%) brightness(25%);
+  object-fit: cover;
+  object-position: 85% center; /* Positioned tight on front light signature */
+  transform: translateX(0) scale(1.15);
+}
+
+/* Open Image styling: 100% brightness & full color, slides in 6% from left */
+.accordion-slide[aria-expanded="true"] .slide-car-image {
+  filter: grayscale(0%) brightness(100%);
+  object-fit: contain;
+  object-position: center 72%;
+  transform: translateX(0);
+  animation: carSlideIn var(--duration-normal) var(--ease-precision) forwards;
+}
+
+@keyframes carSlideIn {
+  0% { transform: translateX(-6%); opacity: 0.6; }
+  100% { transform: translateX(0%); opacity: 1; }
+}
+
+/* Closed Slide Vertical Typography */
+.slide-closed-view {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.accordion-slide[aria-expanded="true"] .slide-closed-view {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.slide-closed-num {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+.slide-closed-name {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: var(--bone);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  margin-bottom: 32px;
+}
+
+/* Open Slide Content */
+.slide-open-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 40px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  z-index: 10;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.4s var(--ease-precision) 0.1s, visibility 0.4s ease;
+  pointer-events: none;
+}
+
+.accordion-slide[aria-expanded="true"] .slide-open-view {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.slide-top-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.slide-model-num {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+.slide-model-name {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(36px, 4.5vw, 64px);
+  color: var(--bone);
+  line-height: 1;
+}
+
+/* Bottom details under car */
+.slide-bottom-details {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 580px;
+  z-index: 15;
+}
+
+.slide-tagline {
+  font-family: var(--font-body);
+  font-size: 15px;
+  color: var(--fog);
+}
+
+.slide-specs-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  padding: 16px 0;
+  border-top: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.spec-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.spec-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  color: var(--fog);
+}
+
+.spec-val {
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  color: var(--xenon);
+}
+
+/* Swatches & CTA */
+.slide-actions-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.swatches-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.swatch-box {
+  width: 12px;
+  height: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease;
+}
+
+.swatch-box.active {
+  border: 1px solid var(--bone);
+  transform: scale(1.15);
+}
+
+.configure-link {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  color: var(--bone);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--xenon);
+  transition: color 0.2s ease;
+}
+
+.configure-link:hover {
+  color: var(--xenon);
+}
+
+/* ==========================================================================
+   SECTION 5 — RESERVE (100vh)
+   Black, centred: "Drive the night."
+   Thin xenon outline button. On hover fills solid xenon with red 2px tick.
+   ========================================================================== */
+.reserve-section {
+  min-height: 100vh;
+  background-color: #000000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 80px 48px;
+  position: relative;
+  border-top: 1px solid var(--hairline);
+}
+
+.reserve-content {
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+}
+
+.reserve-title {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(40px, 6.5vw, 96px);
+  color: var(--bone);
+  line-height: 1;
+}
+
+.reserve-desc {
+  font-family: var(--font-body);
+  font-size: 16px;
+  color: var(--fog);
+  line-height: 1.6;
+  max-width: 48ch;
+}
+
+/* The Xenon Outline CTA Button */
+.reserve-cta-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 36px;
+  margin-top: 16px;
+  border: 1px solid var(--xenon);
+  background-color: transparent;
+  color: var(--bone);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.25s var(--ease-precision),
+              color 0.25s var(--ease-precision);
+  overflow: hidden;
+}
+
+/* Red 2px tick appearing at left on hover */
+.reserve-cta-btn::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  background-color: var(--taillight);
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.25s var(--ease-precision);
+}
+
+.reserve-cta-btn:hover {
+  background-color: var(--xenon);
+  color: var(--asphalt);
+}
+
+.reserve-cta-btn:hover::before {
+  transform: scaleY(1);
+}
+
+/* ==========================================================================
+   FOOTER
+   Hairline top border, wordmark, 3 columns mono links, copyright.
+   ========================================================================== */
+.site-footer {
+  background-color: var(--asphalt);
+  border-top: 1px solid var(--hairline);
+  padding: 80px 48px 48px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 64px;
+}
+
+.footer-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 48px;
+}
+
+.footer-brand {
+  font-family: var(--font-display);
+  font-stretch: 125%;
+  font-variation-settings: 'wdth' 125;
+  font-weight: 300;
+  font-size: clamp(28px, 4vw, 48px);
+  letter-spacing: 0.1em;
+  color: var(--bone);
+}
+
+.footer-cols {
+  display: flex;
+  gap: 64px;
+  flex-wrap: wrap;
+}
+
+.footer-col {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.footer-col-title {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--fog);
+}
+
+.footer-col-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.footer-link {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--bone);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.footer-link:hover {
+  color: var(--xenon);
+}
+
+.footer-bottom {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 32px;
+  border-top: 1px solid var(--hairline);
+}
+
+.copyright-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--fog);
+}
+
+/* ==========================================================================
+   MOBILE RESPONSIVENESS (< 768px)
+   Lineup accordion converts to vertical stacked 72px rows.
+   Pinned stages draw contain-fit vertically centered.
+   ========================================================================== */
+@media (max-width: 768px) {
+  .site-nav {
+    padding: 24px 24px;
+  }
+
+  .nav-links {
+    gap: 20px;
+  }
+
+  .hero-hud {
+    left: 24px;
+    top: auto;
+    bottom: 24px;
+    transform: none;
+    flex-direction: row;
+    gap: 24px;
+  }
+
+  .statement-section,
+  .reserve-section,
+  .site-footer {
+    padding: 64px 24px;
+  }
+
+  .lineup-section {
+    padding: 36px 0 0 0;
+  }
+
+  .lineup-header {
+    padding: 0 24px 24px 24px;
+  }
+
+  .lineup-floor-line {
+    display: none; /* In vertical stack, each slide holds its own layout */
+  }
+
+  .accordion-wrapper {
+    flex-direction: column;
+    min-height: auto;
+  }
+
+  .accordion-slide {
+    border-right: none;
+    border-bottom: 1px solid var(--hairline);
+    min-height: 72px;
+    flex-basis: auto;
+    flex-grow: 0;
+  }
+
+  .accordion-slide[aria-expanded="false"] {
+    height: 72px;
+    flex-grow: 0;
+  }
+
+  .accordion-slide[aria-expanded="true"] {
+    height: auto;
+    min-height: 480px;
+    flex-grow: 0;
+  }
+
+  .slide-closed-view {
+    flex-direction: row;
+    padding: 0 24px;
+    align-items: center;
+  }
+
+  .slide-closed-name {
+    writing-mode: horizontal-tb;
+    transform: none;
+    margin-bottom: 0;
+  }
+
+  .slide-open-view {
+    padding: 32px 24px;
+  }
+
+  .slide-specs-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .footer-cols {
+    gap: 36px;
+  }
+
+  .footer-bottom {
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+}
+
+/* ==========================================================================
+   ACCESSIBILITY: PREFERS-REDUCED-MOTION
+   Disable sticky pinning, replace scrub with static frames, preserve native cursor.
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .headlight-cursor {
+    display: none !important;
+  }
+
+  body.custom-cursor-enabled,
+  body.custom-cursor-enabled a,
+  body.custom-cursor-enabled button {
+    cursor: auto !important;
+  }
+
+  .hero-section,
+  .dismantle-section {
+    height: auto !important;
+  }
+
+  .sticky-stage {
+    position: relative !important;
+    height: 80vh !important;
+  }
+
+  .line-inner {
+    transform: translateY(0%) !important;
+  }
+}
