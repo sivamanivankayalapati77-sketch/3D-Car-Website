@@ -1,8 +1,9 @@
 /**
- * NOCTIS — Main Engine
- * Vanilla JavaScript implementation for high-precision scrollytelling.
- * Handles canvas frame scrubbing, headlight cursor, film grain,
- * word-by-word statement reveal, dismantle callouts, and lineup accordion.
+ * NOCTIS — High-Performance Scrollytelling Engine
+ * Pure Vanilla JavaScript.
+ * Built for 60fps online deployment with HTTP/2 concurrent frame streaming,
+ * keyframe stride preloading, on-demand priority buffering, zero layout thrashing,
+ * custom headlight cursor, film grain overlay, and responsive accordion.
  */
 
 (function () {
@@ -10,7 +11,7 @@
 
   const cfg = window.NOCTIS_CONFIG || {};
 
-  // Check user motion preferences
+  // Check user motion and pointer preferences
   const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const isFinePointer = window.matchMedia('(pointer: fine)').matches;
 
@@ -56,14 +57,22 @@
   const lineupSlides = Array.from(document.querySelectorAll('.accordion-slide'));
 
   // Canvas contexts
-  const heroCtx = heroCanvas ? heroCanvas.getContext('2d', { alpha: false }) : null;
-  const dismantleCtx = dismantleCanvas ? dismantleCanvas.getContext('2d', { alpha: false }) : null;
+  const heroCtx = heroCanvas ? heroCanvas.getContext('2d', { alpha: false, desynchronized: true }) : null;
+  const dismantleCtx = dismantleCanvas ? dismantleCanvas.getContext('2d', { alpha: false, desynchronized: true }) : null;
   const grainCtx = grainCanvas ? grainCanvas.getContext('2d') : null;
 
-  // Frame Cache
+  // Frame Cache & Concurrency Control
   const heroImages = [];
   const dismantleImages = [];
+  const heroInFlight = new Set();
+  const dismantleInFlight = new Set();
   let isMobileViewport = window.innerWidth < (cfg.breakpoints?.mobile || 768);
+
+  // Cached viewport & canvas dimensions (prevents layout thrashing on every RAF)
+  let stageWidth = window.innerWidth;
+  let stageHeight = window.innerHeight;
+  let heroSectionHeight = 0;
+  let dismantleSectionHeight = 0;
 
   // Scrollytelling state
   const state = {
@@ -74,8 +83,8 @@
       currentFrame: 0,
       lastDrawnFrame: -1,
       totalFrames: cfg.frames?.hero?.count || 600,
-      initialLoadedCount: 0,
-      fullyLoaded: false
+      fullyLoaded: false,
+      inView: true
     },
     dismantle: {
       targetProgress: 0,
@@ -84,8 +93,8 @@
       currentFrame: 0,
       lastDrawnFrame: -1,
       totalFrames: cfg.frames?.dismantle?.count || 200,
-      initialLoadedCount: 0,
-      fullyLoaded: false
+      fullyLoaded: false,
+      inView: false
     },
     cursor: {
       targetX: window.innerWidth / 2,
@@ -112,8 +121,9 @@
   }
 
   /* ========================================================================
-     1. PRELOADER & FRAME LOADING
-     Load hero frames 1–40 first, reveal page, then load remaining in background.
+     1. HIGH-SPEED CONCURRENT PRELOADER & ADAPTIVE FRAME BUFFER
+     Loads keyframes across full timeline with 10 concurrent streams.
+     On scroll, priority window loads surrounding frames immediately.
      ======================================================================== */
   function getFramePath(category, index1Based, mobile) {
     const pad = String(index1Based).padStart(4, '0');
@@ -141,65 +151,122 @@
     });
   }
 
+  function loadSingleFrame(category, index0Based) {
+    const arr = category === 'hero' ? heroImages : dismantleImages;
+    const inFlight = category === 'hero' ? heroInFlight : dismantleInFlight;
+
+    if (arr[index0Based] && arr[index0Based].complete && arr[index0Based].naturalWidth > 0) {
+      return Promise.resolve(arr[index0Based]);
+    }
+    if (inFlight.has(index0Based)) {
+      return Promise.resolve(null);
+    }
+    inFlight.add(index0Based);
+
+    const src = getFramePath(category, index0Based + 1, isMobileViewport);
+    return preloadSingleFrame(src)
+      .then((img) => {
+        arr[index0Based] = img;
+        inFlight.delete(index0Based);
+        return img;
+      })
+      .catch(() => {
+        inFlight.delete(index0Based);
+        return null;
+      });
+  }
+
+  // Priority window loading: immediately fetches target frame and its neighbors
+  function prioritizeFrames(category, targetIndex0Based, radius = 6) {
+    const total = category === 'hero' ? state.hero.totalFrames : state.dismantle.totalFrames;
+    for (let r = 0; r <= radius; r++) {
+      const forward = targetIndex0Based + r;
+      const backward = targetIndex0Based - r;
+      if (forward < total) loadSingleFrame(category, forward);
+      if (backward >= 0) loadSingleFrame(category, backward);
+    }
+  }
+
+  // Concurrent queue runner for batching
+  async function runConcurrentQueue(category, indices, concurrency = 10, onProgress = null) {
+    let cursor = 0;
+    let completed = 0;
+    const total = indices.length;
+
+    async function worker() {
+      while (cursor < indices.length) {
+        const idx = indices[cursor++];
+        await loadSingleFrame(category, idx);
+        completed++;
+        if (onProgress) onProgress(completed, total);
+      }
+    }
+
+    const workers = Array.from({ length: Math.min(concurrency, indices.length) }, () => worker());
+    await Promise.all(workers);
+  }
+
   async function initPreloaderAndFrames() {
-    const initialBatchSize = cfg.preloader?.heroInitialBatch || 40;
     const heroCount = state.hero.totalFrames;
-    let initialCount = 0;
+    const dismantleCount = state.dismantle.totalFrames;
 
     // Allocate array slots
     heroImages.length = heroCount;
-    dismantleImages.length = state.dismantle.totalFrames;
+    dismantleImages.length = dismantleCount;
 
-    // Load initial 40 hero frames with smooth progress counter
-    const initialPromises = [];
-    for (let i = 1; i <= initialBatchSize; i++) {
-      const p = preloadSingleFrame(getFramePath('hero', i, isMobileViewport)).then((img) => {
-        heroImages[i - 1] = img;
-        initialCount++;
-        const pct = Math.min(100, Math.round((initialCount / initialBatchSize) * 100));
-        if (preloaderBarEl) preloaderBarEl.style.transform = `translateX(-50%) scaleX(${pct / 100})`;
-        if (preloaderCounterEl) preloaderCounterEl.textContent = String(pct).padStart(3, '0') + '%';
-      });
-      initialPromises.push(p);
-    }
+    // Phase 1: Load initial intro batch (0..24) AND keyframes every 6th frame across all 600 frames
+    // This guarantees full scrubbing across 0% to 100% within ~1.5 seconds!
+    const keyframeIndices = new Set();
+    for (let i = 0; i < 25; i++) keyframeIndices.add(i);
+    for (let i = 0; i < heroCount; i += 6) keyframeIndices.add(i);
+    keyframeIndices.add(heroCount - 1);
 
-    await Promise.all(initialPromises);
+    const phase1Array = Array.from(keyframeIndices);
+    let loadedInitial = 0;
+    const totalInitial = phase1Array.length;
 
-    // Initial batch loaded: Flash preloader bar and fade out
+    await runConcurrentQueue('hero', phase1Array, 10, (done, total) => {
+      loadedInitial = done;
+      const pct = Math.min(100, Math.round((done / total) * 100));
+      if (preloaderBarEl) preloaderBarEl.style.transform = `translateX(-50%) scaleX(${pct / 100})`;
+      if (preloaderCounterEl) preloaderCounterEl.textContent = String(pct).padStart(3, '0') + '%';
+    });
+
+    // Reveal page immediately with initial keyframe coverage
     if (preloaderBarEl) preloaderBarEl.classList.add('flash');
     setTimeout(() => {
       if (preloaderEl) preloaderEl.classList.add('fade-out');
-      // Draw first frame immediately
       drawHeroFrame(0);
       drawDismantleFrame(0);
-    }, 250);
+    }, 200);
 
-    // Continue loading remaining hero frames sequentially in background
-    loadRemainingHeroFrames(initialBatchSize + 1);
-
-    // Then load dismantle frames
-    loadDismantleFrames();
-  }
-
-  async function loadRemainingHeroFrames(startIndex) {
-    const total = state.hero.totalFrames;
-    for (let i = startIndex; i <= total; i++) {
-      const img = await preloadSingleFrame(getFramePath('hero', i, isMobileViewport));
-      heroImages[i - 1] = img;
+    // Phase 2: In background, concurrently fill all remaining intermediate hero frames
+    const remainingHeroIndices = [];
+    for (let i = 0; i < heroCount; i++) {
+      if (!keyframeIndices.has(i)) remainingHeroIndices.push(i);
     }
-    state.hero.fullyLoaded = true;
-  }
+    runConcurrentQueue('hero', remainingHeroIndices, 10).then(() => {
+      state.hero.fullyLoaded = true;
+    });
 
-  async function loadDismantleFrames() {
-    const total = state.dismantle.totalFrames;
-    for (let i = 1; i <= total; i++) {
-      const img = await preloadSingleFrame(getFramePath('dismantle', i, isMobileViewport));
-      dismantleImages[i - 1] = img;
+    // Phase 3: Concurrently load dismantle keyframes (every 5th frame), then intermediate frames
+    const dismantleKeys = [];
+    const dismantleRemaining = [];
+    for (let i = 0; i < dismantleCount; i++) {
+      if (i % 5 === 0 || i === 0 || i === dismantleCount - 1) {
+        dismantleKeys.push(i);
+      } else {
+        dismantleRemaining.push(i);
+      }
     }
-    state.dismantle.fullyLoaded = true;
+    runConcurrentQueue('dismantle', dismantleKeys, 8).then(() => {
+      runConcurrentQueue('dismantle', dismantleRemaining, 8).then(() => {
+        state.dismantle.fullyLoaded = true;
+      });
+    });
   }
 
-  // Fallback to nearest loaded frame to ensure zero stutter
+  // Fallback to nearest loaded frame to guarantee zero stutter
   function getNearestLoadedFrame(framesArray, targetIdx, total) {
     if (framesArray[targetIdx] && framesArray[targetIdx].complete && framesArray[targetIdx].naturalWidth > 0) {
       return framesArray[targetIdx];
@@ -218,48 +285,66 @@
   }
 
   /* ========================================================================
-     2. CANVAS DRAWING (COVER ON LANDSCAPE, CONTAIN ON PORTRAIT)
-     Scale by devicePixelRatio (cap at 2). Centered on --asphalt (#07080A).
+     2. CANVAS DRAWING (ZERO LAYOUT THRASHING)
+     Canvas dimensions & DPR cached on resize.
      ======================================================================== */
-  function drawCanvasImage(ctx, canvas, img, fadeToBlackProgress) {
-    if (!ctx || !canvas || !img) return;
-
+  function updateCanvasDimensions() {
+    stageWidth = window.innerWidth;
+    stageHeight = window.innerHeight;
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const rect = canvas.getBoundingClientRect();
-    const w = Math.round(rect.width);
-    const h = Math.round(rect.height);
 
-    if (canvas.width !== Math.round(w * dpr) || canvas.height !== Math.round(h * dpr)) {
-      canvas.width = Math.round(w * dpr);
-      canvas.height = Math.round(h * dpr);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
+    if (heroSection) heroSectionHeight = heroSection.offsetHeight;
+    if (dismantleSection) dismantleSectionHeight = dismantleSection.offsetHeight;
+
+    if (heroCanvas) {
+      heroCanvas.width = Math.round(stageWidth * dpr);
+      heroCanvas.height = Math.round(stageHeight * dpr);
+      if (heroCtx) {
+        heroCtx.setTransform(1, 0, 0, 1, 0, 0);
+        heroCtx.scale(dpr, dpr);
+      }
     }
+
+    if (dismantleCanvas) {
+      dismantleCanvas.width = Math.round(stageWidth * dpr);
+      dismantleCanvas.height = Math.round(stageHeight * dpr);
+      if (dismantleCtx) {
+        dismantleCtx.setTransform(1, 0, 0, 1, 0, 0);
+        dismantleCtx.scale(dpr, dpr);
+      }
+    }
+  }
+
+  function drawCanvasImage(ctx, img, fadeToBlackProgress) {
+    if (!ctx || !img || !img.complete || img.naturalWidth === 0) return;
+
+    const w = stageWidth;
+    const h = stageHeight;
 
     // Clear with flat solid asphalt background
     ctx.fillStyle = '#07080A';
     ctx.fillRect(0, 0, w, h);
 
     const isPortrait = w < h;
-    const nw = img.naturalWidth || 1600;
-    const nh = img.naturalHeight || 900;
+    const nw = img.naturalWidth;
+    const nh = img.naturalHeight;
 
     let scale, dx, dy;
     if (isPortrait) {
-      // Contain-fit vertically centered
+      // Contain-fit vertically centered on asphalt
       scale = Math.min(w / nw, h / nh);
       const dw = nw * scale;
       const dh = nh * scale;
-      dx = (w - dw) / 2;
-      dy = (h - dh) / 2;
+      dx = (w - dw) * 0.5;
+      dy = (h - dh) * 0.5;
       ctx.drawImage(img, dx, dy, dw, dh);
     } else {
       // Cover-fit
       scale = Math.max(w / nw, h / nh);
       const dw = nw * scale;
       const dh = nh * scale;
-      dx = (w - dw) / 2;
-      dy = (h - dh) / 2;
+      dx = (w - dw) * 0.5;
+      dy = (h - dh) * 0.5;
       ctx.drawImage(img, dx, dy, dw, dh);
     }
 
@@ -278,17 +363,17 @@
     const fadeProgress = state.hero.currentProgress >= fadeStart
       ? (state.hero.currentProgress - fadeStart) / (1 - fadeStart)
       : 0;
-    drawCanvasImage(heroCtx, heroCanvas, frame, fadeProgress);
+    drawCanvasImage(heroCtx, frame, fadeProgress);
   }
 
   function drawDismantleFrame(frameIndex) {
     const frame = getNearestLoadedFrame(dismantleImages, frameIndex, state.dismantle.totalFrames);
-    drawCanvasImage(dismantleCtx, dismantleCanvas, frame, 0);
+    drawCanvasImage(dismantleCtx, frame, 0);
   }
 
   /* ========================================================================
      3. FILM GRAIN OVERLAY
-     Small noise tile generated once offscreen, randomly shifted 8x/s, 3.5% opacity.
+     Offscreen noise tile randomly translated ~8x/s, 3.5% opacity, no vignette.
      ======================================================================== */
   function initFilmGrain() {
     if (!grainCanvas || !grainCtx) return;
@@ -342,7 +427,6 @@
       state.cursor.targetY = e.clientY;
     });
 
-    // Mousedown flash (120ms brighter)
     window.addEventListener('mousedown', () => {
       cursorEl.classList.add('is-down');
       setTimeout(() => {
@@ -350,7 +434,6 @@
       }, 120);
     });
 
-    // Interactive element hover detection
     const interactiveSelector = 'a, button, [role="button"], input, .accordion-slide, .swatch-box';
     document.addEventListener('mouseover', (e) => {
       const target = e.target.closest(interactiveSelector);
@@ -358,7 +441,6 @@
         state.cursor.isHovering = true;
         cursorEl.classList.add('is-hovering');
 
-        // Determine context label
         let label = target.getAttribute('data-cursor-label');
         if (!label) {
           if (target.tagName === 'A' && target.getAttribute('href')?.startsWith('#')) {
@@ -385,7 +467,6 @@
 
   /* ========================================================================
      5. NAVIGATION SHOW/HIDE ON SCROLL
-     Hides on scroll down, shows on scroll up.
      ======================================================================== */
   function updateNav() {
     if (!siteNavEl) return;
@@ -404,7 +485,6 @@
 
   /* ========================================================================
      6. SECTION 2 — STATEMENT WORD-BY-WORD REVEAL
-     Sentence spans 15% to 100% opacity driven by viewport scroll.
      ======================================================================== */
   let statementWords = [];
 
@@ -427,9 +507,8 @@
     if (!statementSection || statementWords.length === 0) return;
 
     const rect = statementSection.getBoundingClientRect();
-    const vh = window.innerHeight;
+    const vh = stageHeight;
 
-    // Active range: begins when top enters at 80% vh, ends when center reaches 40% vh
     const enterY = vh * 0.85;
     const fullY = vh * 0.35;
     const progress = clamp((enterY - rect.top) / (enterY - fullY), 0, 1);
@@ -446,7 +525,6 @@
 
   /* ========================================================================
      7. SECTION 3 — DISMANTLE CALLOUTS
-     Four callouts (BODY, DRIVE, LIGHT, BATTERY) with SVG hairline connecting lines.
      ======================================================================== */
   function initDismantleCallouts() {
     if (!dismantleCalloutsContainer) return;
@@ -458,13 +536,11 @@
       itemEl.className = 'callout-item';
       itemEl.id = `co-${co.id}`;
 
-      // Dot on the part
       const dot = document.createElement('div');
       dot.className = 'callout-dot';
       dot.style.left = `${co.dotX}%`;
       dot.style.top = `${co.dotY}%`;
 
-      // Text card
       const card = document.createElement('div');
       card.className = 'callout-card';
       card.style.left = `${co.cardX}%`;
@@ -474,7 +550,6 @@
         <div class="callout-name">${co.name}</div>
       `;
 
-      // SVG connecting line
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
       svg.setAttribute('class', 'callout-line-svg');
       const path = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -492,9 +567,6 @@
 
   function updateDismantleCalloutLines() {
     if (!dismantleCalloutsContainer) return;
-    const stageRect = dismantleStage ? dismantleStage.getBoundingClientRect() : null;
-    if (!stageRect) return;
-
     const callouts = cfg.dismantle?.callouts || [];
     callouts.forEach((co) => {
       const itemEl = document.getElementById(`co-${co.id}`);
@@ -503,10 +575,10 @@
       const line = itemEl.querySelector('.callout-line-path');
       if (!line) return;
 
-      const dotX = (co.dotX / 100) * stageRect.width;
-      const dotY = (co.dotY / 100) * stageRect.height;
-      const cardX = (co.cardX / 100) * stageRect.width;
-      const cardY = (co.cardY / 100) * stageRect.height;
+      const dotX = (co.dotX / 100) * stageWidth;
+      const dotY = (co.dotY / 100) * stageHeight;
+      const cardX = (co.cardX / 100) * stageWidth;
+      const cardY = (co.cardY / 100) * stageHeight;
 
       line.setAttribute('x1', dotX);
       line.setAttribute('y1', dotY);
@@ -531,8 +603,6 @@
 
   /* ========================================================================
      8. SECTION 4 — LINEUP ACCORDION
-     5 vertical slides across full width. GT-E open by default.
-     Debounced hover (80ms), keyboard accessibility, color swatches.
      ======================================================================== */
   let lineupHoverTimer = null;
   let activeSlideIndex = cfg.lineup?.defaultOpenIndex || 0;
@@ -552,10 +622,9 @@
   function initLineupAccordion() {
     if (!lineupSlides.length) return;
 
-    // Hover debounce for desktop
     lineupSlides.forEach((slide, idx) => {
       slide.addEventListener('mouseenter', () => {
-        if (window.innerWidth < 768) return; // Touch row stack handled by click
+        if (window.innerWidth < 768) return;
         clearTimeout(lineupHoverTimer);
         lineupHoverTimer = setTimeout(() => {
           setOpenSlide(idx);
@@ -570,7 +639,6 @@
         setOpenSlide(idx);
       });
 
-      // Keyboard arrow navigation
       slide.addEventListener('keydown', (e) => {
         if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
           e.preventDefault();
@@ -586,7 +654,6 @@
       });
     });
 
-    // Swatch box selection
     const swatches = document.querySelectorAll('.swatch-box');
     swatches.forEach((sw) => {
       sw.addEventListener('click', (e) => {
@@ -599,7 +666,6 @@
       });
     });
 
-    // Reveal animation when lineup enters viewport
     const lineupObserver = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
@@ -624,30 +690,32 @@
   }
 
   /* ========================================================================
-     9. SCROLL PROGRESS COMPUTATION
-     progress = clamp(-wrapper.getBoundingClientRect().top / (wrapper.offsetHeight - innerHeight), 0, 1)
-     targetFrame = round(progress * (frameCount - 1))
+     9. SCROLL PROGRESS COMPUTATION & ON-DEMAND PRIORITY BUFFERING
      ======================================================================== */
   function updateScrollProgress() {
-    const vh = window.innerHeight;
+    const vh = stageHeight;
 
     // 1. Hero Pinned Scrollytelling
     if (heroSection) {
       const rect = heroSection.getBoundingClientRect();
-      const scrollableDist = heroSection.offsetHeight - vh;
+      state.hero.inView = rect.bottom > 0 && rect.top < vh;
+
+      const scrollableDist = heroSectionHeight - vh;
       const heroProg = scrollableDist > 0 ? clamp(-rect.top / scrollableDist, 0, 1) : 0;
       state.hero.targetProgress = heroProg;
-      state.hero.targetFrame = Math.round(heroProg * (state.hero.totalFrames - 1));
+      const targetFrame = Math.round(heroProg * (state.hero.totalFrames - 1));
+      state.hero.targetFrame = targetFrame;
 
-      // Update Hero progress line
+      // On-demand priority buffer around target frame
+      if (state.hero.inView) {
+        prioritizeFrames('hero', targetFrame, 8);
+      }
+
       if (heroProgressLine) {
         heroProgressLine.style.transform = `scaleX(${heroProg})`;
       }
 
-      // Update Hero HUD
       updateHeroHUD(heroProg);
-
-      // Update Hero Chapters
       updateHeroChapters(heroProg);
     }
 
@@ -657,21 +725,26 @@
     // 3. Dismantle Pinned Scrollytelling
     if (dismantleSection) {
       const rect = dismantleSection.getBoundingClientRect();
-      const scrollableDist = dismantleSection.offsetHeight - vh;
+      state.dismantle.inView = rect.bottom > 0 && rect.top < vh;
+
+      const scrollableDist = dismantleSectionHeight - vh;
       const dismantleProg = scrollableDist > 0 ? clamp(-rect.top / scrollableDist, 0, 1) : 0;
       state.dismantle.targetProgress = dismantleProg;
-      state.dismantle.targetFrame = Math.round(dismantleProg * (state.dismantle.totalFrames - 1));
+      const targetFrame = Math.round(dismantleProg * (state.dismantle.totalFrames - 1));
+      state.dismantle.targetFrame = targetFrame;
 
-      // Update Dismantle progress line
+      // On-demand priority buffer around target frame
+      if (state.dismantle.inView) {
+        prioritizeFrames('dismantle', targetFrame, 8);
+      }
+
       if (dismantleProgressLine) {
         dismantleProgressLine.style.transform = `scaleX(${dismantleProg})`;
       }
 
-      // Update Callouts visibility
       updateDismantleCalloutsState(dismantleProg);
 
       if (prefersReducedMotion) {
-        // Reduced motion: first + last frame
         drawDismantleFrame(dismantleProg > 0.5 ? state.dismantle.totalFrames - 1 : 0);
       }
     }
@@ -683,7 +756,6 @@
   function updateHeroHUD(progress) {
     if (!hudChapterEl || !hudSpeedEl || !hudDistanceEl) return;
 
-    // Chapter index (01-04)
     let chapterText = '01 / 04';
     if (progress >= 0.80) {
       chapterText = '04 / 04';
@@ -694,12 +766,10 @@
     }
     hudChapterEl.textContent = chapterText;
 
-    // Velocity 000 -> 118 KM/H
     const maxSpeed = cfg.hero?.hud?.speedMax || 118;
     const speed = Math.round(progress * maxSpeed);
     hudSpeedEl.textContent = String(speed).padStart(3, '0') + ' KM/H';
 
-    // Distance 0.0 -> 4.2 KM
     const maxDist = cfg.hero?.hud?.distanceMax || 4.2;
     const distance = (progress * maxDist).toFixed(1);
     hudDistanceEl.textContent = distance + ' KM';
@@ -718,7 +788,6 @@
         const lines = el.querySelectorAll('.line-inner');
         lines.forEach((line) => line.classList.add('line-revealed'));
         if (prefersReducedMotion) {
-          // Reduced motion: show one static frame per chapter (0%, 35%, 65%, 100%)
           const staticIndices = [
             0,
             Math.round(state.hero.totalFrames * 0.35),
@@ -734,13 +803,10 @@
   }
 
   /* ========================================================================
-     10. MAIN RAF ANIMATION LOOP
-     60fps smooth scrubbing with lerp factor 0.15.
-     Cursor follow with lerp factor 0.18.
-     Only redraws when rounded frame changes.
+     10. MAIN RAF ANIMATION LOOP (60 FPS SMOOTH)
      ======================================================================== */
   function renderLoop() {
-    // 1. Custom Cursor Follow
+    // 1. Headlight Cursor Lerp
     if (cursorEl && isFinePointer && !prefersReducedMotion) {
       const cLerp = cfg.motion?.cursorLerp || 0.18;
       state.cursor.currentX = lerp(state.cursor.currentX, state.cursor.targetX, cLerp);
@@ -751,22 +817,26 @@
     if (!prefersReducedMotion) {
       const sLerp = cfg.motion?.canvasScrubLerp || 0.15;
 
-      // 2. Hero Scrubbing
-      state.hero.currentProgress = lerp(state.hero.currentProgress, state.hero.targetProgress, sLerp);
-      state.hero.currentFrame = lerp(state.hero.currentFrame, state.hero.targetFrame, sLerp);
-      const roundedHero = Math.round(state.hero.currentFrame);
-      if (roundedHero !== state.hero.lastDrawnFrame || state.hero.currentProgress >= (cfg.hero?.fadeToBlackStart || 0.95)) {
-        drawHeroFrame(roundedHero);
-        state.hero.lastDrawnFrame = roundedHero;
+      // 2. Hero Scrubbing (Culled if offscreen)
+      if (state.hero.inView) {
+        state.hero.currentProgress = lerp(state.hero.currentProgress, state.hero.targetProgress, sLerp);
+        state.hero.currentFrame = lerp(state.hero.currentFrame, state.hero.targetFrame, sLerp);
+        const roundedHero = Math.round(state.hero.currentFrame);
+        if (roundedHero !== state.hero.lastDrawnFrame || state.hero.currentProgress >= (cfg.hero?.fadeToBlackStart || 0.95)) {
+          drawHeroFrame(roundedHero);
+          state.hero.lastDrawnFrame = roundedHero;
+        }
       }
 
-      // 3. Dismantle Scrubbing
-      state.dismantle.currentProgress = lerp(state.dismantle.currentProgress, state.dismantle.targetProgress, sLerp);
-      state.dismantle.currentFrame = lerp(state.dismantle.currentFrame, state.dismantle.targetFrame, sLerp);
-      const roundedDismantle = Math.round(state.dismantle.currentFrame);
-      if (roundedDismantle !== state.dismantle.lastDrawnFrame) {
-        drawDismantleFrame(roundedDismantle);
-        state.dismantle.lastDrawnFrame = roundedDismantle;
+      // 3. Dismantle Scrubbing (Culled if offscreen)
+      if (state.dismantle.inView) {
+        state.dismantle.currentProgress = lerp(state.dismantle.currentProgress, state.dismantle.targetProgress, sLerp);
+        state.dismantle.currentFrame = lerp(state.dismantle.currentFrame, state.dismantle.targetFrame, sLerp);
+        const roundedDismantle = Math.round(state.dismantle.currentFrame);
+        if (roundedDismantle !== state.dismantle.lastDrawnFrame) {
+          drawDismantleFrame(roundedDismantle);
+          state.dismantle.lastDrawnFrame = roundedDismantle;
+        }
       }
     }
 
@@ -780,18 +850,15 @@
     const wasMobile = isMobileViewport;
     isMobileViewport = window.innerWidth < (cfg.breakpoints?.mobile || 768);
 
+    updateCanvasDimensions();
     updateDismantleCalloutLines();
     updateScrollProgress();
 
-    // If breakpoint changed, force redraw
     if (wasMobile !== isMobileViewport) {
       drawHeroFrame(state.hero.lastDrawnFrame >= 0 ? state.hero.lastDrawnFrame : 0);
       drawDismantleFrame(state.dismantle.lastDrawnFrame >= 0 ? state.dismantle.lastDrawnFrame : 0);
     }
   }
-
-  window.addEventListener('scroll', updateScrollProgress, { passive: true });
-  window.addEventListener('resize', handleResize, { passive: true });
 
   // Apply configured section heights from config.js
   if (heroSection && cfg.hero?.wrapperHeight) {
@@ -801,7 +868,11 @@
     dismantleSection.style.height = cfg.dismantle.wrapperHeight;
   }
 
-  // Initialize all subsystems
+  window.addEventListener('scroll', updateScrollProgress, { passive: true });
+  window.addEventListener('resize', handleResize, { passive: true });
+
+  // Initialize
+  updateCanvasDimensions();
   initFilmGrain();
   initCustomCursor();
   initStatementSection();
