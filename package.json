@@ -1,0 +1,12 @@
+{
+  "name": "noctis-3d-car-website",
+  "version": "1.0.0",
+  "description": "NOCTIS premium scrollytelling web experience",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["noctis", "scrollytelling", "canvas", "3d", "car"],
+  "author": "NOCTIS",
+  "license": "ISC"
+}
